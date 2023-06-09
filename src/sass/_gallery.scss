@@ -1,0 +1,29 @@
+.gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 30px;
+  padding: 30px 40px;
+  max-width: 1200px;
+  align-items: center;
+}
+.photo-card {
+  
+}
+
+.info {
+  display: flex;
+  gap: 10px;
+  max-width: 250px;
+  align-items: center;
+  justify-content: space-around;;
+}
+.info-item {
+  font-family: Cambria, Cochin, Georgia, Times, 'Times New Roman', serif;
+  font-size: 12px;
+  text-align: center;
+}
+
+b,
+span {
+  display: block;
+}

@@ -1,103 +1,238 @@
-import './css/styles.css';
+import axios from 'axios';
 import { Notify } from 'notiflix/build/notiflix-notify-aio';
 import SimpleLightbox from 'simplelightbox';
 import 'simplelightbox/dist/simple-lightbox.min.css';
-import axios from 'axios';
+import debounce from 'lodash.debounce';
+const DEBOUNCE_DELAY = 500;
 
-const KEY = '34508781-665843dc1d4446224c16b5110';
-const restAPI = '&image_type=photo&orientation=horizontal&safesearch=true';
-let page = 1;
-let namePhoto = ' ';
-const perPage = 40;
-
-axios.defaults.baseURL = 'https://pixabay.com/api/';
-
-async function searchPhoto(namePhoto, page = 1, perPage = 40) {
-  const response = await axios(
-    `?key=${KEY}&q=${namePhoto}${restAPI}&page=${page}&per_page=${perPage}`
-  );
-  return response;
-}
-
-const lightbox = new SimpleLightbox('.gallery a', {
-  captionsData: 'alt',
+let galleryLightBox = new SimpleLightbox('.gallery .photo-card-link', {
+  widthRatio: 0.8,
+  heightRatio: 0.8,
+  animationSpeed: 250,
+  // scaleImageToRatio: true,
 });
 
-const searchFormPoto = document.querySelector('#search-form');
-const galleryPhoto = document.querySelector('.gallery');
-const loadMoreBtn = document.querySelector('.load-more');
+const form = document.getElementById('search-form');
+const gallery = document.querySelector('.gallery');
 
-searchFormPoto.addEventListener('submit', onSubmitPhoto);
-loadMoreBtn.addEventListener('click', onLoadMore);
+const key = `36503211-5a6b1020ee80a2c92835fdd88`;
 
-async function onSubmitPhoto(e) {
-  e.preventDefault();
-  galleryPhoto.innerHTML = '';
-  loadMoreBtn.style.display = 'none';
+const searchParams = new URLSearchParams({
+  image_type: 'photo',
+  orientation: 'horizontal',
+  safesearch: 'true',
+  per_page: 40,
+});
 
-  namePhoto = e.target.elements.searchQuery.value.trim();
-  if (!namePhoto) {
-    return Notify.failure(
-      'Sorry, the search field cannot be empty. Please enter information to search.'
-    );
+class PhotoService {
+  constructor() {
+    this.page = 1;
+    this.searchValue = '';
   }
-    const { data } = await searchPhoto(namePhoto);
-    
-  cardPhoto(data); 
-  messageInfo(data); 
-  stopSearch(data); 
-  e.target.reset(); 
-}  
 
-async function onLoadMore() {
-    page += 1;
-    const { data } = await searchPhoto(namePhoto, page, perPage);
-    cardPhoto(data);
-    stopSearch(data);
-    smoothScroll();
+  async getPhoto() {
+    const response = await axios.get(
+      `https://pixabay.com/api/?key=${key}&q=${this.searchValue}&${searchParams}&page=${this.page}`
+    );
+    this.incrementPage();
+    return response;
+  }
+
+  resetPage() {
+    this.page = 1;
+  }
+
+  incrementPage() {
+    this.page += 1;
+  }
 }
 
-function cardPhoto(arr) {
-  const markUp = arr.hits
-    .map(el => {
-      return `
-    <div class="photo-card">
-    <a class="gallery-link" href="${el.largeImageURL}">
-    <img src="${el.webformatURL}" alt="${el.tags}" loading="lazy" />
+const photoService = new PhotoService();
+
+class LoadMoreBtn {
+  constructor({ selector }) {
+    this.button = this.getButton(selector);
+  }
+
+  getButton(selector) {
+    return document.querySelector(selector);
+  }
+
+  hide() {
+    this.button.hidden = true;
+  }
+
+  show() {
+    this.button.hidden = false;
+  }
+
+  disable() {
+    this.button.disabled = true;
+    this.button.textContent = 'Loading...';
+  }
+
+  enable() {
+    this.button.disabled = false;
+    this.button.textContent = 'Load more';
+  }
+}
+
+const loadMoreBtn = new LoadMoreBtn({
+  selector: '.load-more',
+});
+
+loadMoreBtn.hide();
+
+form.addEventListener('submit', onSubmit);
+// loadMoreBtn.button.addEventListener('click', fetchPhotos);
+
+function onSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const value = form.elements.searchQuery.value.trim();
+
+  if (value === '') Notify.failure('No value!');
+  else {
+    photoService.searchValue = value;
+    photoService.resetPage();
+    clearPhotoGallery();
+    form.reset();
+    getPhotoMarkup();
+    window.addEventListener('scroll', handleScrollDeb);
+    // loadMoreBtn.show();
+  }
+}
+
+async function getPhotoMarkup() {
+  try {
+    const response = await photoService.getPhoto();
+    const arrayPhotos = response.data.hits;
+
+    if (arrayPhotos.length === 0) {
+      loadMoreBtn.hide();
+      Notify.failure(
+        'Sorry, there are no images matching your search query. Please try again.'
+      );
+      return '';
+    } else {
+      showTotalHits(response.data.totalHits);
+      const markuplist = arrayPhotos.reduce(
+        (markup, photo) => markup + createMarkup(photo),
+        ''
+      );
+      updatePhotoGallery(markuplist);
+      addStatusLoadMoreBtn(arrayPhotos.length);
+      galleryLightBox.refresh();
+    }
+  } catch (err) {
+    onError(err);
+  }
+}
+
+async function fetchPhotos() {
+  try {
+    window.addEventListener('scroll', handleScrollDeb);
+    loadMoreBtn.disable();
+    const response = await photoService.getPhoto();
+    const arrayPhotos = response.data.hits;
+    if (arrayPhotos.length !== 0 ) {
+      showTotalHits(response.data.totalHits);
+      const markuplist = arrayPhotos.reduce(
+        (markup, photo) => markup + createMarkup(photo),
+        ''
+      );
+      updatePhotoGallery(markuplist);
+      addStatusLoadMoreBtn();
+      galleryLightBox.refresh();
+    } else {
+      // loadMoreBtn.hide();
+      window.removeEventListener('scroll', handleScrollDeb);
+      console.log('click event listener was removed from btn');
+
+      Notify.failure(
+        "We're sorry, but you've reached the end of search results."
+      );
+    }
+
+  } catch (err) {
+    onError(err);
+  }
+}
+
+function createMarkup({
+  webformatURL,
+  largeImageURL,
+  tags,
+  likes,
+  views,
+  comments,
+  downloads,
+}) {
+  return `
+  <div class="photo-card">
+  <a class="photo-card-link" href="${largeImageURL}">
+    <img
+      src="${webformatURL}"
+      alt="${tags}"
+      loading="lazy"
+      width=250
+      height=200
+    />
     </a>
-    <div class="info">
-    <p class="info-item"><b>Likes</b>${el.likes}
+  <div class="info">
+    <p class="info-item">
+      <b>Likes</b>
+      <span>${likes}</span>
     </p>
-    <p class="info-item"><b>Views</b>${el.views}
+    <p class="info-item">
+      <b>Views</b>
+      <span>${views}</span>
     </p>
-    <p class="info-item"><b>Comments</b>${el.comments}
+    <p class="info-item">
+      <b>Comments</b>
+      <span>${comments}</span>
     </p>
-    <p class="info-item"><b>Downloads</b>${el.downloads}
+    <p class="info-item">
+      <b>Downloads</b>
+      <span>${downloads}</span>
     </p>
-    </div>
-    </div>`;
-    })
-    .join('');
-  galleryPhoto.insertAdjacentHTML('beforeend', markUp);
-  lightbox.refresh();
+  </div>
+  
+</div>`;
 }
 
-function messageInfo(arr) {
-  if (arr.hits.length === 0) {
-    Notify.warning(
-      'Sorry, there are no images matching your search query. Please try again.'
-    );
-  }
-  if (arr.totalHits !== 0) {
-    Notify.success(`Hooray! We found ${arr.totalHits} images.`);
+function updatePhotoGallery(markuplist) {
+  gallery.insertAdjacentHTML('beforeend', markuplist);
+}
+
+function clearPhotoGallery() {
+  gallery.innerHTML = '';
+}
+
+function onError(err) {
+  console.error(err);
+  clearPhotoGallery('<p>Not found!</p>');
+}
+
+function showTotalHits(totalHits) {
+  Notify.info(`Hooray! We found ${totalHits} images.`);
+}
+
+function addStatusLoadMoreBtn(length) {
+  if (length < 40) {
+    return loadMoreBtn.hide();
+  } else {
+    return loadMoreBtn.enable();
   }
 }
-function stopSearch(arr) {
-  if (arr.hits.length < 40 && arr.hits.length > 0) {
-    loadMoreBtn.style.display = 'none';
-    Notify.info("We're sorry, but you've reached the end of search results.");
+// ! Infinite scroll
+const handleScrollDeb = debounce(() => {
+  const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
+
+  if (scrollTop + clientHeight >= scrollHeight - 1) {
+    fetchPhotos();
   }
-  if (arr.hits.length === 40) {
-    loadMoreBtn.style.display = 'block';
-  }
-}
+}, DEBOUNCE_DELAY);
+
+window.addEventListener('scroll', handleScrollDeb);
+console.log(document);
